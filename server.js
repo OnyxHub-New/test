@@ -1,67 +1,46 @@
 const express = require('express');
-const fs = require('fs');
-const path = require('path');
+const WebSocket = require('ws');
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 
-const dataPath = path.join(__dirname, 'data.json');
-
-
-function readData() {
-  try {
-    if (!fs.existsSync(dataPath)) {
-      fs.writeFileSync(dataPath, '[]');
-      return [];
-    }
-    const rawData = fs.readFileSync(dataPath, 'utf-8');
-    return JSON.parse(rawData || '[]'); 
-  } catch (e) {
-    console.error('Ошибка чтения data.json:', e.message);
-    return []; 
-  }
-}
-
-
-app.use(express.json());
-app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Origin', '*');
-  res.header('Access-Control-Allow-Methods', 'GET, POST');
-  next();
-});
-
-
 app.get('/', (req, res) => {
-  res.send('Check');
+  res.send('test');
 });
 
-app.post('/save', (req, res) => {
-  try {
-    const { robloxNick } = req.body;
-    if (!robloxNick) {
-      return res.status(400).send('Требуется robloxNick!');
-    }
+const server = app.listen(PORT, () => {
+  console.log(`Server started`);
+});
 
-    const data = readData(); 
-    const newEntry = {
-      robloxNick,
-      ip: req.ip.replace('::ffff:', ''),
-      userAgent: req.headers['user-agent'] || 'Unknown',
+
+const wss = new WebSocket.Server({ server });
+
+wss.on('connection', (ws) => {
+  console.log('New client connected');
+  
+
+  ws.send(JSON.stringify({
+    type: 'welcome',
+    message: 'Successfully connected',
+    timestamp: new Date().toISOString()
+  }));
+  
+
+  ws.on('message', (message) => {
+    console.log(`Received: ${message}`);
+    
+
+    ws.send(JSON.stringify({
+      type: 'echo',
+      message: `Server received: ${message}`,
       timestamp: new Date().toISOString()
-    };
-
-    data.push(newEntry);
-    fs.writeFileSync(dataPath, JSON.stringify(data, null, 2)); 
-
-    console.log('New User', newEntry);
-    res.status(200).send('Данные получены!');
-  } catch (e) {
-    console.error('Ошибка в /save:', e);
-    res.status(500).send('Ошибка сервера');
-  }
+    }));
+  });
+  
+  ws.on('close', () => {
+    console.log('Client disconnected');
+  });
 });
 
-
-app.listen(PORT, () => {
-  console.log('Файл данных:', dataPath);
-});
+console.log(`server is running`);
