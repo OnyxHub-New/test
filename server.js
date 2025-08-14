@@ -1,14 +1,14 @@
-
 const express = require('express');
 const bodyParser = require('body-parser');
 const fs = require('fs');
 const path = require('path');
+const morgan = require('morgan');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(bodyParser.json());
-app.use(express.static('public'));
+app.use(morgan('dev'));
 
 const logDir = path.join(__dirname, 'logs');
 if (!fs.existsSync(logDir)) {
@@ -28,14 +28,53 @@ function logToFile(data) {
     });
 }
 
+app.get('/', (req, res) => {
+    res.status(200).json({
+        status: 'success',
+        message: 'Onyx Hub Logger API is running',
+        endpoints: {
+            log: 'POST /log - для отправки логов',
+            logs: 'GET /logs - для получения списка логов'
+        }
+    });
+});
+
 app.post('/log', (req, res) => {
-    const data = req.body;
-    console.log('Received log:', data);
-    logToFile(data);
-    res.status(200).send('Logged successfully');
+    try {
+        const data = req.body;
+        console.log('New log entry:', data);
+        logToFile(data);
+        res.status(200).json({ status: 'success', message: 'Log saved' });
+    } catch (error) {
+        console.error('Error processing log:', error);
+        res.status(500).json({ status: 'error', message: 'Internal server error' });
+    }
+});
+
+app.get('/logs', (req, res) => {
+    try {
+        const files = fs.readdirSync(logDir);
+        res.status(200).json({
+            status: 'success',
+            data: files
+        });
+    } catch (error) {
+        console.error('Error reading logs:', error);
+        res.status(500).json({ status: 'error', message: 'Internal server error' });
+    }
+});
+
+app.use((req, res) => {
+    res.status(404).json({ status: 'error', message: 'Endpoint not found' });
+});
+
+app.use((err, req, res, next) => {
+    console.error('Server error:', err);
+    res.status(500).json({ status: 'error', message: 'Internal server error' });
 });
 
 
 app.listen(PORT, () => {
     console.log(`Server running`);
+    console.log(`Logs directory: ${logDir}`);
 });
