@@ -1,80 +1,85 @@
 const express = require('express');
+const cors = require('cors');
 const bodyParser = require('body-parser');
-const fs = require('fs');
-const path = require('path');
-const morgan = require('morgan');
+const { v4: uuidv4 } = require('uuid');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+app.use(cors());
 app.use(bodyParser.json());
-app.use(morgan('dev'));
 
-const logDir = path.join(__dirname, 'logs');
-if (!fs.existsSync(logDir)) {
-    fs.mkdirSync(logDir);
-}
+const clientDataStore = new Map();
 
-function logToFile(data) {
-    const date = new Date();
-    const logDate = `${date.getFullYear()}-${date.getMonth()+1}-${date.getDate()}`;
-    const logTime = `${date.getHours()}:${date.getMinutes()}:${date.getSeconds()}`;
-    
-    const logFileName = path.join(logDir, `log_${logDate}.txt`);
-    const logEntry = `[${logTime}] ${JSON.stringify(data)}\n`;
-    
-    fs.appendFile(logFileName, logEntry, (err) => {
-        if (err) console.error('Error writing to log file:', err);
+app.get('/api/client-id', (req, res) => {
+    const clientId = uuidv4();
+    clientDataStore.set(clientId, {
+        id: clientId,
+        createdAt: new Date(),
+        lastUpdated: new Date(),
+        robloxClientId: null,
+        isValid: false
     });
-}
+    
+    res.json({ clientId });
+});
 
-app.get('/', (req, res) => {
-    res.status(200).json({
-        status: 'success',
-        message: 'Onyx Hub Logger API is running',
-        endpoints: {
-            log: 'POST /log - для отправки логов',
-            logs: 'GET /logs - для получения списка логов'
+app.post('/api/submit-data', (req, res) => {
+    const { clientId, robloxClientId } = req.body;
+    
+    if (!clientId || !robloxClientId) {
+        return res.status(400).json({ error: 'clientId and robloxClientId are required' });
+    }
+    
+    if (!clientDataStore.has(clientId)) {
+        return res.status(404).json({ error: 'Client ID not found' });
+    }
+    
+    const clientData = clientDataStore.get(clientId);
+    clientData.robloxClientId = robloxClientId;
+    clientData.lastUpdated = new Date();
+    clientData.isValid = true;
+    
+    clientDataStore.set(clientId, clientData);
+    
+    res.json({ 
+        success: true, 
+        message: 'Data submitted successfully',
+        data: clientData
+    });
+});
+
+app.get('/api/verify/:clientId', (req, res) => {
+    const { clientId } = req.params;
+    
+    if (!clientDataStore.has(clientId)) {
+        return res.status(404).json({ error: 'Client ID not found' });
+    }
+    
+    const clientData = clientDataStore.get(clientId);
+    
+    res.json({
+        exists: true,
+        isValid: clientData.isValid,
+        robloxClientId: clientData.robloxClientId,
+        createdAt: clientData.createdAt,
+        lastUpdated: clientData.lastUpdated
+    });
+});
+
+setInterval(() => {
+    const now = new Date();
+    const twentyFourHoursAgo = new Date(now.getTime() - (24 * 60 * 60 * 1000));
+    
+    for (const [clientId, data] of clientDataStore.entries()) {
+        if (data.createdAt < twentyFourHoursAgo) {
+            clientDataStore.delete(clientId);
         }
-    });
-});
-
-app.post('/log', (req, res) => {
-    try {
-        const data = req.body;
-        console.log('New log entry:', data);
-        logToFile(data);
-        res.status(200).json({ status: 'success', message: 'Log saved' });
-    } catch (error) {
-        console.error('Error processing log:', error);
-        res.status(500).json({ status: 'error', message: 'Internal server error' });
     }
-});
-
-app.get('/logs', (req, res) => {
-    try {
-        const files = fs.readdirSync(logDir);
-        res.status(200).json({
-            status: 'success',
-            data: files
-        });
-    } catch (error) {
-        console.error('Error reading logs:', error);
-        res.status(500).json({ status: 'error', message: 'Internal server error' });
-    }
-});
-
-app.use((req, res) => {
-    res.status(404).json({ status: 'error', message: 'Endpoint not found' });
-});
-
-app.use((err, req, res, next) => {
-    console.error('Server error:', err);
-    res.status(500).json({ status: 'error', message: 'Internal server error' });
-});
-
+    
+    console.log(`Cleaned up old entries. Current count: ${clientDataStore.size}`);
+}, 24 * 60 * 60 * 1000);
 
 app.listen(PORT, () => {
-    console.log(`Server running`);
-    console.log(`Logs directory: ${logDir}`);
+    console.log(`Server running on port ${PORT}`);
 });
